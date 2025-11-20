@@ -11,9 +11,32 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 """
 
 import os
+import boto3
+from django.db import migrations
+from pathlib import Path
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Load environment variables from .env file
+env_file = Path(BASE_DIR) / '.env'
+if env_file.exists():
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ.setdefault(key, value)
+
+DSQL_ENDPOINT = os.environ.get('DSQL_ENDPOINT', 'localhost')
+
+def get_dsql_password():
+    client = boto3.client('dsql', region_name='eu-west-1')
+    return client.generate_db_connect_admin_auth_token(DSQL_ENDPOINT, 'eu-west-1')
+
+# Monkey-patch MigrationRecorder to generate IDs
+from mysite.migration_recorder import MigrationRecorder
+migrations.recorder.MigrationRecorder = MigrationRecorder
 
 
 # Quick-start development settings - unsuitable for production
@@ -31,6 +54,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'mysite',
     'polls.apps.PollsConfig',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,6 +63,16 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 ]
+
+MIGRATION_MODULES = {
+    'contenttypes': 'contenttypes_migrations',
+    'auth': 'auth_migrations',
+    'admin': 'admin_migrations',
+    'sessions': 'sessions_migrations',
+}
+
+AUTH_USER_MODEL = 'mysite.User'
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -76,10 +110,23 @@ WSGI_APPLICATION = 'mysite.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        'ENGINE': 'dsql_backend',
+        'NAME': 'postgres',
+        'USER': 'admin',
+        'PASSWORD': get_dsql_password(),
+        'HOST': DSQL_ENDPOINT,
+        'PORT': '5432',
+        'OPTIONS': {
+            'sslmode': 'verify-full',
+            'sslrootcert': os.path.join(BASE_DIR, 'root.pem'),
+        },
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
     }
 }
+
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
 
 
 # Password validation
